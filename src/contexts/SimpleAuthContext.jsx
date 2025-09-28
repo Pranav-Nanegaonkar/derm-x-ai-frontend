@@ -10,7 +10,7 @@ export const useSimpleAuth = () => {
   return context;
 };
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://derm-x-ai-backend.onrender.com/';
 
 export const SimpleAuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
