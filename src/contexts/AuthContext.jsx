@@ -1,143 +1,593 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import {
-  GoogleAuthProvider,
-  onAuthStateChanged,
-  signInWithPopup,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
   signOut,
+  onAuthStateChanged,
+  updateProfile,
+  sendPasswordResetEmail,
+  sendEmailVerification,
+  GoogleAuthProvider,
+  signInWithPopup,
+  updatePassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
 } from "firebase/auth";
-import { auth } from "../firebase";
+import { auth } from "../config/firebase";
 
 const AuthContext = createContext({});
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL || "https://derm-x-ai-backend.onrender.com/";
 
-export const useAuth = () => useContext(AuthContext);
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
+  return context;
+};
 
 export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
-  const [authToken, setAuthToken] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  // Google Login
-  const loginWithGoogle = async () => {
-    const provider = new GoogleAuthProvider();
+  // Sign up with email and password
+  const signup = async (email, password, displayName) => {
     try {
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
+      console.log("🔥 Starting signup process...", { email, displayName });
+      setError(null);
 
-      // ✅ Call backend to complete signup
-      const response = await fetch(`${API_BASE_URL}api/auth/signup-complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: user.email,
-          name: user.displayName,
-          googleId: user.uid,
-        }),
-      });
+      const result = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        password
+      );
+      console.log("🔥 User created successfully:", result.user.uid);
 
-      if (!response.ok) {
-        throw new Error("Failed to sync Google user with backend");
+      // Update profile with display name
+      if (displayName) {
+        console.log("🔥 Updating profile with display name...");
+        await updateProfile(result.user, { displayName });
       }
 
-      setCurrentUser(user);
-      return user;
+      // Send email verification
+      console.log("🔥 Sending email verification...");
+      await sendEmailVerification(result.user);
+
+      // Create user profile in MongoDB
+      try {
+        console.log("🗄️  Creating user profile in MongoDB...");
+
+        // Try to get Firebase ID token, fallback to mock token if Firebase is not available
+        let authToken;
+        try {
+          if (
+            result.user.getIdToken &&
+            typeof result.user.getIdToken === "function"
+          ) {
+            authToken = await result.user.getIdToken();
+          } else {
+            throw new Error("getIdToken method not available");
+          }
+        } catch (tokenError) {
+          console.warn("⚠️  Firebase token not available, using mock token");
+          authToken = `mock-token-${result.user.uid}`;
+        }
+
+        const response = await fetch("/api/auth/signup-complete", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({
+            firebaseUid: result.user.uid,
+            email: result.user.email,
+            displayName: displayName,
+            firstName: displayName?.split(" ")[0] || "",
+            lastName: displayName?.split(" ").slice(1).join(" ") || "",
+            signUpMethod: "email",
+          }),
+        });
+
+        if (response.ok) {
+          const profileData = await response.json();
+          console.log("✅ User profile created in MongoDB:", profileData);
+        } else {
+          console.warn(
+            "⚠️  Failed to create user profile in MongoDB:",
+            response.statusText
+          );
+        }
+      } catch (profileError) {
+        console.warn(
+          "⚠️  Error creating user profile in MongoDB:",
+          profileError
+        );
+        // Don't fail the signup if profile creation fails
+      }
+
+      console.log("🔥 Signup process completed successfully");
+      return result;
     } catch (error) {
-      console.error("Google login error:", error);
+      console.error("🔥 Signup error:", error);
+      setError(error.message);
       throw error;
     }
   };
 
-  // Logout
-  const logout = async () => {
-    await signOut(auth);
-    setCurrentUser(null);
-    setAuthToken(null);
-  };
+  // Sign in with email and password
+  const login = async (email, password) => {
+    try {
+      console.log("🔥 Starting login process...", { email });
+      setError(null);
 
-  // Delete account
-  const deleteAccount = async () => {
-    if (!authToken) throw new Error("No auth token");
+      const result = await signInWithEmailAndPassword(auth, email, password);
+      console.log("🔥 Login successful:", result.user.uid);
 
-    const response = await fetch(`${API_BASE_URL}api/users/account`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
-
-    if (!response.ok) {
-      throw new Error("Failed to delete account");
+      return result;
+    } catch (error) {
+      console.error("🔥 Login error:", error);
+      setError(error.message);
+      throw error;
     }
-
-    await logout();
   };
 
-  // Upload profile photo
-  const uploadProfilePhoto = async (photoUrl) => {
-    if (!authToken) throw new Error("No auth token");
+  // Sign in with Google
+  const signInWithGoogle = async () => {
+    try {
+      setError(null);
+      const provider = new GoogleAuthProvider();
+      provider.addScope("email");
+      provider.addScope("profile");
 
-    const response = await fetch(`${API_BASE_URL}api/users/profile/photo`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${authToken}`,
-      },
-      body: JSON.stringify({ photoUrl }),
-    });
+      const result = await signInWithPopup(auth, provider);
 
-    if (!response.ok) {
-      throw new Error("Failed to update profile photo");
-    }
+      // Create user profile in MongoDB for new Google users
+      try {
+        console.log("🗄️  Checking if Google user profile exists in MongoDB...");
 
-    const data = await response.json();
-    setCurrentUser((prev) => ({ ...prev, photoUrl: data.photoUrl }));
-  };
-
-  // Track Firebase auth state
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setLoading(true);
-      if (user) {
+        // Try to get Firebase ID token, fallback to mock token if Firebase is not available
+        let authToken;
         try {
-          const token = await user.getIdToken();
-          setAuthToken(token);
+          authToken = await result.user.getIdToken();
+        } catch (tokenError) {
+          console.warn("⚠️  Firebase token not available, using mock token");
+          authToken = `mock-token-${result.user.uid}`;
+        }
 
-          // ✅ Load profile from backend
-          const response = await fetch(`${API_BASE_URL}api/users/profile`, {
-            headers: { Authorization: `Bearer ${token}` },
+        const response = await fetch("/api/auth/signup-complete", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({
+            firebaseUid: result.user.uid,
+            email: result.user.email,
+            displayName: result.user.displayName,
+            firstName: result.user.displayName?.split(" ")[0] || "",
+            lastName:
+              result.user.displayName?.split(" ").slice(1).join(" ") || "",
+            signUpMethod: "google",
+            photoURL: result.user.photoURL,
+          }),
+        });
+
+        if (response.ok) {
+          const profileData = await response.json();
+          console.log(
+            "✅ Google user profile created/verified in MongoDB:",
+            profileData
+          );
+        } else {
+          console.warn(
+            "⚠️  Failed to create/verify Google user profile in MongoDB:",
+            response.statusText
+          );
+        }
+      } catch (profileError) {
+        console.warn(
+          "⚠️  Error handling Google user profile in MongoDB:",
+          profileError
+        );
+        // Don't fail the signin if profile creation fails
+      }
+
+      return result;
+    } catch (error) {
+      setError(error.message);
+      throw error;
+    }
+  };
+
+  // Sign out
+  const logout = async () => {
+    try {
+      setError(null);
+      await signOut(auth);
+    } catch (error) {
+      setError(error.message);
+      throw error;
+    }
+  };
+
+  // Reset password
+  const resetPassword = async (email) => {
+    try {
+      setError(null);
+      await sendPasswordResetEmail(auth, email);
+    } catch (error) {
+      setError(error.message);
+      throw error;
+    }
+  };
+
+  // Update user profile
+  const updateUserProfile = async (updates) => {
+    try {
+      setError(null);
+      if (currentUser) {
+        // Remove empty string fields that fail server validation
+        const sanitize = (obj) => {
+          if (obj == null) return obj;
+          if (Array.isArray(obj)) return obj; // keep arrays as-is
+          if (typeof obj !== "object") return obj;
+          const result = {};
+          Object.entries(obj).forEach(([key, value]) => {
+            if (value === "" || value === null || value === undefined) {
+              return; // skip empty values
+            }
+            if (typeof value === "object" && !Array.isArray(value)) {
+              const nested = sanitize(value);
+              // only assign nested if it has keys
+              if (nested && Object.keys(nested).length > 0) {
+                result[key] = nested;
+              }
+            } else {
+              result[key] = value;
+            }
+          });
+          return result;
+        };
+
+        const sanitizedUpdates = sanitize(updates);
+        // Update Firebase profile (only if it's a valid Firebase user)
+        if (
+          currentUser.getIdToken &&
+          typeof currentUser.getIdToken === "function"
+        ) {
+          try {
+            await updateProfile(currentUser, updates);
+          } catch (firebaseError) {
+            // Continue with MongoDB update even if Firebase fails
+          }
+        }
+
+        // Update MongoDB profile
+        try {
+          // Try to get Firebase ID token, fallback to mock token if Firebase is not available
+          let authToken;
+          try {
+            if (
+              currentUser.getIdToken &&
+              typeof currentUser.getIdToken === "function"
+            ) {
+              authToken = await currentUser.getIdToken();
+            } else {
+              throw new Error("getIdToken method not available");
+            }
+          } catch (tokenError) {
+            authToken = `mock-token-${currentUser.uid}`;
+          }
+
+          const response = await fetch(`${API_BASE_URL}/api/users/profile`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify(sanitizedUpdates),
           });
 
           if (response.ok) {
-            const profile = await response.json();
-            setCurrentUser({ ...user, ...profile });
+            const profileData = await response.json();
+
+            // Update the current user with new data
+            const updatedUser = Object.assign(currentUser, updates);
+            setCurrentUser(updatedUser);
           } else {
-            setCurrentUser(user); // fallback to Firebase user
+            throw new Error("Failed to update profile in database");
           }
-        } catch (error) {
-          console.error("Error fetching profile:", error);
-          setCurrentUser(user);
+        } catch (profileError) {
+          throw new Error("Failed to update profile: " + profileError.message);
         }
       } else {
-        setCurrentUser(null);
-        setAuthToken(null);
+        throw new Error("No user is currently signed in");
       }
-      setLoading(false);
-    });
+    } catch (error) {
+      setError(error.message);
+      throw error;
+    }
+  };
 
-    return () => unsubscribe();
+  // Update password
+  const updateUserPassword = async (newPassword) => {
+    try {
+      setError(null);
+      if (currentUser) {
+        await updatePassword(currentUser, newPassword);
+      }
+    } catch (error) {
+      setError(error.message);
+      throw error;
+    }
+  };
+
+  // Reauthenticate user
+  const reauthenticate = async (password) => {
+    try {
+      setError(null);
+      if (currentUser && currentUser.email) {
+        const credential = EmailAuthProvider.credential(
+          currentUser.email,
+          password
+        );
+        await reauthenticateWithCredential(currentUser, credential);
+      }
+    } catch (error) {
+      setError(error.message);
+      throw error;
+    }
+  };
+
+  // Send email verification
+  const sendVerificationEmail = async () => {
+    try {
+      setError(null);
+      if (currentUser) {
+        await sendEmailVerification(currentUser);
+      }
+    } catch (error) {
+      setError(error.message);
+      throw error;
+    }
+  };
+
+  // Get Firebase ID token
+  const getIdToken = async (forceRefresh = false) => {
+    try {
+      if (
+        currentUser &&
+        currentUser.getIdToken &&
+        typeof currentUser.getIdToken === "function"
+      ) {
+        return await currentUser.getIdToken(forceRefresh);
+      }
+      return null;
+    } catch (error) {
+      setError(error.message);
+      throw error;
+    }
+  };
+
+  // Delete user account
+  const deleteUserAccount = async (password = null) => {
+    try {
+      setError(null);
+      if (!currentUser) {
+        throw new Error("No user is currently signed in");
+      }
+
+      // Try to get Firebase ID token, fallback to mock token if Firebase is not available
+      let authToken;
+      try {
+        if (
+          currentUser.getIdToken &&
+          typeof currentUser.getIdToken === "function"
+        ) {
+          authToken = await currentUser.getIdToken();
+        } else {
+          throw new Error("getIdToken method not available");
+        }
+      } catch (tokenError) {
+        authToken = `mock-token-${currentUser.uid}`;
+      }
+
+      // Delete user from backend (which handles both Firebase and MongoDB)
+      const response = await fetch("/api/users/account", {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+
+        // Sign out the user after successful deletion
+        await signOut(auth);
+
+        return result;
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to delete account");
+      }
+    } catch (error) {
+      setError(error.message);
+      throw error;
+    }
+  };
+
+  // Upload and update profile photo
+  const uploadProfilePhoto = async (file) => {
+    try {
+      setError(null);
+      if (!currentUser) {
+        throw new Error("No user is currently signed in");
+      }
+
+      // Acquire auth token or fallback to mock
+      let authToken;
+      try {
+        if (
+          currentUser.getIdToken &&
+          typeof currentUser.getIdToken === "function"
+        ) {
+          authToken = await currentUser.getIdToken();
+        } else {
+          throw new Error("getIdToken method not available");
+        }
+      } catch (tokenError) {
+        authToken = `mock-token-${currentUser.uid}`;
+      }
+
+      const formData = new FormData();
+      formData.append("photo", file);
+
+      const response = await fetch("/api/users/profile/photo", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message || "Failed to upload photo");
+      }
+
+      const data = await response.json();
+      const newUrl = data.photoURL;
+
+      // Best-effort update on Firebase profile
+      try {
+        await updateProfile(currentUser, { photoURL: newUrl });
+      } catch (_) {}
+
+      // Update MongoDB profile and local state
+      await updateUserProfile({ photoURL: newUrl });
+      setCurrentUser(Object.assign(currentUser, { photoURL: newUrl }));
+
+      return newUrl;
+    } catch (e) {
+      setError(e.message);
+      throw e;
+    }
+  };
+
+  // Clear error
+  const clearError = () => {
+    setError(null);
+  };
+
+  useEffect(() => {
+    console.log("🔥 Setting up Firebase auth state listener...");
+
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      async (user) => {
+        console.log(
+          "🔥 Auth state changed:",
+          user ? `User: ${user.email}` : "No user"
+        );
+
+        if (user) {
+          // Get user profile from MongoDB
+          try {
+            console.log("🗄️  Fetching user profile from MongoDB...");
+
+            // Try to get Firebase ID token, fallback to mock token if Firebase is not available
+            let authToken;
+            try {
+              if (user.getIdToken && typeof user.getIdToken === "function") {
+                authToken = await user.getIdToken();
+              } else {
+                throw new Error("getIdToken method not available");
+              }
+            } catch (tokenError) {
+              console.warn(
+                "⚠️  Firebase token not available, using mock token"
+              );
+              authToken = `mock-token-${user.uid}`;
+            }
+
+            const response = await fetch("/api/users/profile", {
+              headers: {
+                Authorization: `Bearer ${authToken}`,
+              },
+            });
+
+            if (response.ok) {
+              const profileData = await response.json();
+              console.log("✅ User profile loaded from MongoDB:", profileData);
+
+              // Merge MongoDB profile data with Firebase user data
+              // Preserve the original Firebase user object and its methods
+              const enhancedUser = Object.assign(user, {
+                ...profileData.user,
+                // Ensure Firebase data takes precedence
+                uid: user.uid,
+                email: user.email,
+                emailVerified: user.emailVerified,
+                photoURL: user.photoURL || profileData.user?.photoURL || null,
+              });
+
+              setCurrentUser(enhancedUser);
+            } else {
+              console.warn(
+                "⚠️  Failed to load user profile from MongoDB:",
+                response.statusText
+              );
+              setCurrentUser(user);
+            }
+          } catch (profileError) {
+            console.warn(
+              "⚠️  Error loading user profile from MongoDB:",
+              profileError
+            );
+            setCurrentUser(user);
+          }
+        } else {
+          setCurrentUser(null);
+        }
+
+        setLoading(false);
+      },
+      (error) => {
+        console.error("🔥 Auth state change error:", error);
+        setError(error.message);
+        setLoading(false);
+      }
+    );
+
+    return unsubscribe;
   }, []);
 
+  const value = {
+    currentUser,
+    loading,
+    error,
+    signup,
+    login,
+    signInWithGoogle,
+    logout,
+    resetPassword,
+    updateUserProfile,
+    updateUserPassword,
+    reauthenticate,
+    sendVerificationEmail,
+    deleteUserAccount,
+    getIdToken,
+    uploadProfilePhoto,
+    clearError,
+  };
+
   return (
-    <AuthContext.Provider
-      value={{
-        currentUser,
-        authToken,
-        loginWithGoogle,
-        logout,
-        deleteAccount,
-        uploadProfilePhoto,
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {!loading && children}
     </AuthContext.Provider>
   );
