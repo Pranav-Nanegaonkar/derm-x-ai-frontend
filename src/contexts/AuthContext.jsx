@@ -17,6 +17,9 @@ import { auth } from "../config/firebase";
 
 const AuthContext = createContext({});
 
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL || "https://derm-x-ai-backend.onrender.com/";
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
@@ -280,7 +283,7 @@ export const AuthProvider = ({ children }) => {
             authToken = `mock-token-${currentUser.uid}`;
           }
 
-          const response = await fetch("/api/users/profile", {
+          const response = await fetch(`${API_BASE_URL}/api/users/profile`, {
             method: "PUT",
             headers: {
               "Content-Type": "application/json",
