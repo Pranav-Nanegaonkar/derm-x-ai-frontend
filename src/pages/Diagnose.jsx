@@ -75,7 +75,7 @@ const Diagnose = () => {
         token = await getIdToken();
       } catch (e) { }
 
-      const response = await fetch("/api/diagnosis/analyze", {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/diagnosis/analyze`, {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         body: formData,
