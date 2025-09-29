@@ -17,8 +17,7 @@ import { auth } from "../config/firebase";
 
 const AuthContext = createContext({});
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "https://derm-x-ai-backend.onrender.com/";
+const API_BASE_URL = import.meta.env.VITE_API_URL || "https://derm-x-ai-backend.onrender.com";
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -76,7 +75,7 @@ export const AuthProvider = ({ children }) => {
           authToken = `mock-token-${result.user.uid}`;
         }
 
-        const response = await fetch("/api/auth/signup-complete", {
+        const response = await fetch(`${API_BASE_URL}/api/auth/signup-complete`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -158,7 +157,7 @@ export const AuthProvider = ({ children }) => {
           authToken = `mock-token-${result.user.uid}`;
         }
 
-        const response = await fetch("/api/auth/signup-complete", {
+        const response = await fetch(`${API_BASE_URL}/api/auth/signup-complete`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -397,7 +396,7 @@ export const AuthProvider = ({ children }) => {
       }
 
       // Delete user from backend (which handles both Firebase and MongoDB)
-      const response = await fetch("/api/users/account", {
+      const response = await fetch(`${API_BASE_URL}/api/users/account`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${authToken}`,
@@ -447,7 +446,7 @@ export const AuthProvider = ({ children }) => {
       const formData = new FormData();
       formData.append("photo", file);
 
-      const response = await fetch("/api/users/profile/photo", {
+      const response = await fetch(`${API_BASE_URL}/api/users/profile/photo`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${authToken}`,
@@ -466,7 +465,7 @@ export const AuthProvider = ({ children }) => {
       // Best-effort update on Firebase profile
       try {
         await updateProfile(currentUser, { photoURL: newUrl });
-      } catch (_) {}
+      } catch (_) { }
 
       // Update MongoDB profile and local state
       await updateUserProfile({ photoURL: newUrl });
@@ -515,7 +514,7 @@ export const AuthProvider = ({ children }) => {
               authToken = `mock-token-${user.uid}`;
             }
 
-            const response = await fetch("/api/users/profile", {
+            const response = await fetch(`${API_BASE_URL}/api/users/profile`, {
               headers: {
                 Authorization: `Bearer ${authToken}`,
               },
