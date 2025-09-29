@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
-const API_BASE_URL = '/api/dashboard';
+const API_BASE_URL = `${import.meta.env.VITE_API_URL}/api/dashboard`;
 
 export const useDashboard = () => {
   const { currentUser, getIdToken } = useAuth();
@@ -38,7 +38,7 @@ export const useDashboard = () => {
 
       // Get auth token
       const token = await getIdToken();
-      
+
       const response = await fetch(`${API_BASE_URL}/overview`, {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -55,7 +55,7 @@ export const useDashboard = () => {
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
       setError(err.message);
-      
+
       // Set fallback data on error
       setData({
         stats: {
