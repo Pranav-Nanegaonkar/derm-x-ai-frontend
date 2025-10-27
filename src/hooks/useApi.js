@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE_URL = import.meta.env.VITE_API_URL;
 
 export const useApi = () => {
   const [loading, setLoading] = useState(false);
