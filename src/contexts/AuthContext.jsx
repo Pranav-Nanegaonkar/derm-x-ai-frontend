@@ -17,8 +17,6 @@ import { auth } from "../config/firebase";
 
 const AuthContext = createContext({});
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || "https://derm-x-ai-backend.onrender.com";
-
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
@@ -31,6 +29,52 @@ export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // // Send email verification
+  // const sendVerificationEmail = async () => {
+  //   try {
+  //     setError(null);
+  //     if (currentUser) {
+  //       await sendEmailVerification(currentUser);
+  //       console.log("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX Email verification sent");
+  //     }
+  //   } catch (error) {
+  //     setError(error.message);
+  //     throw error;
+  //   }
+  // };
+
+  //! Send email verification (frontend)
+  const sendVerificationEmail = async () => {
+    try {
+      setError(null);
+      if (currentUser) {
+        // Get Firebase ID token to authenticate with backend
+        const token = await currentUser.getIdToken();
+
+        const response = await fetch(
+          "http://localhost:5000/api/auth/send-verification-email",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ email: currentUser.email }),
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to send verification email");
+        }
+
+        console.log("✅ Custom verification email requested via backend");
+      }
+    } catch (error) {
+      setError(error.message);
+      throw error;
+    }
+  };
 
   // Sign up with email and password
   const signup = async (email, password, displayName) => {
@@ -52,8 +96,9 @@ export const AuthProvider = ({ children }) => {
       }
 
       // Send email verification
-      console.log("🔥 Sending email verification...");
-      await sendEmailVerification(result.user);
+      // console.log("🔥 Sending email verification...");
+      // await sendVerificationEmail();
+      // ! await sendEmailVerification(result.user);
 
       // Create user profile in MongoDB
       try {
@@ -75,7 +120,7 @@ export const AuthProvider = ({ children }) => {
           authToken = `mock-token-${result.user.uid}`;
         }
 
-        const response = await fetch(`${API_BASE_URL}/api/auth/signup-complete`, {
+        const response = await fetch("/api/auth/signup-complete", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -157,7 +202,7 @@ export const AuthProvider = ({ children }) => {
           authToken = `mock-token-${result.user.uid}`;
         }
 
-        const response = await fetch(`${API_BASE_URL}/api/auth/signup-complete`, {
+        const response = await fetch("/api/auth/signup-complete", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -213,11 +258,26 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Reset password
+  // Reset password using backend API
   const resetPassword = async (email) => {
     try {
       setError(null);
-      await sendPasswordResetEmail(auth, email);
+      
+      const response = await fetch("/api/send-reset-password-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to send reset email");
+      }
+
+      const data = await response.json();
+      return data;
     } catch (error) {
       setError(error.message);
       throw error;
@@ -282,7 +342,7 @@ export const AuthProvider = ({ children }) => {
             authToken = `mock-token-${currentUser.uid}`;
           }
 
-          const response = await fetch(`${API_BASE_URL}/api/users/profile`, {
+          const response = await fetch("/api/users/profile", {
             method: "PUT",
             headers: {
               "Content-Type": "application/json",
@@ -342,19 +402,6 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Send email verification
-  const sendVerificationEmail = async () => {
-    try {
-      setError(null);
-      if (currentUser) {
-        await sendEmailVerification(currentUser);
-      }
-    } catch (error) {
-      setError(error.message);
-      throw error;
-    }
-  };
-
   // Get Firebase ID token
   const getIdToken = async (forceRefresh = false) => {
     try {
@@ -396,7 +443,7 @@ export const AuthProvider = ({ children }) => {
       }
 
       // Delete user from backend (which handles both Firebase and MongoDB)
-      const response = await fetch(`${API_BASE_URL}/api/users/account`, {
+      const response = await fetch("/api/users/account", {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${authToken}`,
@@ -446,7 +493,7 @@ export const AuthProvider = ({ children }) => {
       const formData = new FormData();
       formData.append("photo", file);
 
-      const response = await fetch(`${API_BASE_URL}/api/users/profile/photo`, {
+      const response = await fetch("/api/users/profile/photo", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${authToken}`,
@@ -465,7 +512,7 @@ export const AuthProvider = ({ children }) => {
       // Best-effort update on Firebase profile
       try {
         await updateProfile(currentUser, { photoURL: newUrl });
-      } catch (_) { }
+      } catch (_) {}
 
       // Update MongoDB profile and local state
       await updateUserProfile({ photoURL: newUrl });
@@ -514,7 +561,7 @@ export const AuthProvider = ({ children }) => {
               authToken = `mock-token-${user.uid}`;
             }
 
-            const response = await fetch(`${API_BASE_URL}/api/users/profile`, {
+            const response = await fetch("/api/users/profile", {
               headers: {
                 Authorization: `Bearer ${authToken}`,
               },

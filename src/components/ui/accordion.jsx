@@ -13,7 +13,6 @@ const AccordionItem = React.forwardRef(({ className, ...props }, ref) => (
     {...props}
   />
 ))
-
 AccordionItem.displayName = "AccordionItem"
 
 const AccordionTrigger = React.forwardRef(({ className, children, ...props }, ref) => (
